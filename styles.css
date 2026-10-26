@@ -416,7 +416,7 @@ noscript { display: block; max-width: 500px; margin: 80px auto; padding: 30px; }
     --mobile-nav-inset: max(6px, var(--mobile-safe-bottom));
     --mobile-nav-height: calc(56px + var(--mobile-nav-inset));
   }
-  .main { margin-left: 0; padding: calc(var(--mobile-safe-top) + 16px) 18px calc(var(--mobile-nav-height) + 16px); }
+  .main { margin-left: 0; padding: calc(var(--mobile-safe-top) + 36px) 18px calc(var(--mobile-nav-height) + 16px); }
   .topbar { min-height: 45px; margin-bottom: 22px; gap: 12px; align-items: flex-start; }
   .eyebrow { font-size: 10px; color: #96a1b2; letter-spacing: .9px; margin-bottom: 6px; }
   .page-title { font-size: 26px; letter-spacing: -.9px; }
@@ -948,4 +948,45 @@ dialog.wide { width: min(650px,calc(100% - 32px)); }
   .entry-page .save-key { min-height: 46px; margin-top: 9px; box-shadow: 0 4px 14px #0006; }
   .entry-page .quick-save-note { display: none; }
   .entry-page + .main-footer { display: none; }
+}
+
+/* Clear header content below the iPhone system area, without translucent effects. */
+@media (max-width: 650px) {
+  .topbar { background: var(--bg); filter: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .topbar .eyebrow { color: #b5bfce; }
+  .topbar-actions .icon-button,.topbar-actions .settings-shortcut { background: #18212d; color: #e6edf5; border: 1px solid #344152; }
+  /* Natural scrolling preserves all keypad targets and brings save above navigation. */
+  .entry-page { padding-bottom: 12px; }
+  .entry-page .save-key { position: static; scroll-margin-bottom: calc(var(--mobile-nav-height) + 20px); }
+  .main:has(.entry-page) { padding-bottom: calc(var(--mobile-nav-height) + 32px); }
+  .entry-page .numpad { scroll-margin-bottom: calc(var(--mobile-nav-height) + 80px); }
+}
+.debt-progress { margin-top: 16px; }
+.debt-payments { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 6px; }
+.payment-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; font-size: 11px; }
+.payment-row + .payment-row { border-top: 1px solid var(--line-soft); }
+.payment-row span { color: var(--muted); }
+.payment-row strong { font-variant-numeric: tabular-nums; }
+.recurring-type-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 4px 7px; margin-bottom: 10px; background: var(--purple-bg); color: var(--purple); font-size: 9px; }
+.recurring-mode { color: var(--muted); font-size: 10px; line-height: 1.6; margin-top: 9px; }
+.recurring-summary { color: var(--muted); font-size: 11px; line-height: 1.7; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); margin: 12px 0; }
+.check-field { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; line-height: 1.6; cursor: pointer; margin: 14px 0; }
+.check-field input[type="checkbox"] { flex: 0 0 18px; width: 18px; height: 18px; min-height: 18px; margin: 1px 0 0; padding: 0; accent-color: var(--green); }
+
+.debt-history-button { margin-top: 14px; }
+button.payment-row { width: 100%; border: 0; background: transparent; text-align: left; color: var(--text); cursor: pointer; }
+.payment-row span { min-width: 0; }
+.payment-row small { display: block; margin-top: 3px; max-width: 270px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payment-row .icon { width: 14px; height: 14px; color: var(--muted); }
+.recurring-summary > .icon { margin-right: 6px; }
+@media (max-width: 650px) { .plans-section .section-heading { align-items: flex-start; } .plans-section .section-heading > div { min-width: 0; } .plans-section .section-heading .button { flex-shrink: 0; } }
+@media (max-width: 650px) {
+  /* Recover form space while keeping the header below the iPhone blur zone. */
+  .entry-page .amount-display { position: relative; }
+  .entry-page .amount-label { position: absolute; right: 0; top: 12px; line-height: 12px; pointer-events: none; }
+  .entry-page .expression { padding-right: 66px!important; }
+  .entry-page .type-tabs { margin-bottom: 5px; }
+  .entry-page .entry-fields > .field { margin-bottom: 7px; }
+  .entry-page .save-key { margin-top: 7px; }
+  dialog input,dialog select,dialog textarea { font-size: 16px; }
 }

@@ -1,7 +1,7 @@
 /* Static, relative-path cache works at both / and /repository/ on GitHub Pages. */
 const PREFIX = 'potok-static-';
-const CACHE = PREFIX + 'v1.0.5';
-const CORE = ['./','./index.html','./styles.css?v=1.0.5','./app.js','./finance.js','./manifest.json','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png'];
+const CACHE = PREFIX + 'v1.1.0';
+const CORE = ['./','./index.html','./styles.css?v=1.1.0','./app.js?v=1.1.0','./finance.js?v=1.1.0','./pwa.js?v=1.1.0','./manifest.json','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png'];
 const OPTIONAL = ['https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js','https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js'];
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
@@ -26,6 +26,11 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   const local = url.origin === self.location.origin && url.pathname.startsWith(new URL(self.registration.scope).pathname);
   if (!local && !OPTIONAL.includes(url.href)) return;
+  // Verification probes must reach the network and must never fall back to saved HTML.
+  if (event.request.cache === 'no-store' || url.searchParams.has('_potok_check')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
     if (event.request.mode === 'navigate') {

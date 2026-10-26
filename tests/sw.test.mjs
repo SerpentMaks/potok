@@ -7,7 +7,7 @@ test('PWA manifest paths, icon sizes and core offline files are valid', () => {
   const m=JSON.parse(fs.readFileSync(new URL('manifest.json',root)));
   assert.equal(m.display,'standalone'); assert.equal(m.scope,'./');
   for(const i of m.icons){const b=fs.readFileSync(new URL(i.src,root));assert.equal(b.readUInt32BE(16),Number(i.sizes.split('x')[0]));assert.equal(b.readUInt32BE(20),Number(i.sizes.split('x')[1]));}
-  for(const file of ['index.html','app.js','finance.js','styles.css','sw.js'])assert.ok(fs.statSync(new URL(file,root)).size>0);
+  for(const file of ['index.html','app.js','finance.js','styles.css','pwa.js','sw.js'])assert.ok(fs.statSync(new URL(file,root)).size>0);
   assert.equal(m.start_url,'./#entry');
 });
 test('Service Worker installs offline shell despite CDN failure and serves offline navigation', async () => {
@@ -22,15 +22,17 @@ test('Service Worker installs offline shell despite CDN failure and serves offli
   const context={URL,Response,AbortSignal,Promise,self:{location:{origin:'https://example.test'},registration:{scope:'https://example.test/repo/'},addEventListener:(name,fn)=>handlers[name]=fn,skipWaiting:async()=>skipped=true,clients:{claim:async()=>claimed=true}},caches:{open:async()=>cache,keys:async()=>['potok-static-old','other-app'],delete:async key=>deleted.push(key)},fetch:async()=>{throw Error('network unavailable');}};
   vm.runInNewContext(fs.readFileSync(new URL('sw.js',root),'utf8'),context);
   let waiting;
-  handlers.install({waitUntil:p=>waiting=p});await waiting;assert.ok(skipped);assert.ok(entries.has('https://example.test/repo/app.js'));
+  handlers.install({waitUntil:p=>waiting=p});await waiting;assert.ok(skipped);for (const file of ['app.js','finance.js','pwa.js','styles.css']) assert.ok(entries.has(`https://example.test/repo/${file}?v=1.1.0`));
   handlers.activate({waitUntil:p=>waiting=p});await waiting;assert.ok(claimed);assert.deepEqual(deleted,['potok-static-old']);
   let response;
   handlers.fetch({request:{method:'GET',url:'https://example.test/repo/',mode:'navigate'},respondWith:p=>response=p});
   assert.match(await (await response).text(),/Поток/);
-  handlers.fetch({request:{method:'GET',url:'https://example.test/repo/app.js',mode:'cors'},respondWith:p=>response=p});
+  handlers.fetch({request:{method:'GET',url:'https://example.test/repo/app.js?v=1.1.0',mode:'cors'},respondWith:p=>response=p});
   assert.match(await (await response).text(),/import \* as F/);
   handlers.fetch({request:{method:'GET',url:'https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js',mode:'cors'},respondWith:p=>response=p});
   assert.equal(await (await response).text(),'');
+  handlers.fetch({request:{method:'GET',url:'https://example.test/repo/index.html?_potok_check=unique',mode:'cors',cache:'no-store'},respondWith:p=>response=p});
+  await assert.rejects(response,/network unavailable/);
   let intercepted=false;
   handlers.fetch({request:{method:'POST',url:'https://example.test/repo/',mode:'cors'},respondWith:()=>intercepted=true});assert.equal(intercepted,false);
 });

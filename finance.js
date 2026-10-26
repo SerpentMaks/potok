@@ -82,13 +82,13 @@ const BASE_CATEGORIES = [
 ];
 export function createState({demo = false} = {}) {
   const state = {
-    schemaVersion:1,
+    schemaVersion:2,
     wallets:[{id:'card',name:'Основная карта',initialBalance:0,kind:'personal',color:'#b6f36a'},
       {id:'cash',name:'Наличные',initialBalance:0,kind:'personal',color:'#f6c875'},
       {id:'savings',name:'Накопления',initialBalance:0,kind:'personal',color:'#a78bfa'},
       {id:'business',name:'Бизнес-счёт',initialBalance:0,kind:'business',color:'#69c9e8'}],
     categories:BASE_CATEGORIES.map(([id,name,type,icon,color])=>({id,name,type,icon,color})),
-    transactions:[],subscriptions:[],goals:[],debts:[],settings:{monthlyLimit:0,currency:'RUB'},tags:[]
+    transactions:[],subscriptions:[],recurringRuns:[],goals:[],debts:[],settings:{monthlyLimit:0,currency:'RUB'},tags:[]
   };
   if(!demo) return state;
   state.wallets.forEach((w,i)=>w.initialBalance=[18500000,780000,24500000,19800000][i]);
@@ -116,6 +116,7 @@ export function createState({demo = false} = {}) {
   state.subscriptions=[{id:'sub-music',name:'Яндекс Плюс',amount:39900,day:28,walletId:'card',scope:'personal'},
     {id:'sub-cloud',name:'Облачное хранилище',amount:24900,day:15,walletId:'card',scope:'personal'},
     {id:'sub-design',name:'Дизайн-сервисы',amount:240000,day:30,walletId:'business',scope:'business'}];
+  state.subscriptions=state.subscriptions.map(sub=>({...sub,type:'expense',categoryId:'subscriptions',auto:false,startDate:monthStart(now)}));
   state.goals=[{id:'goal-trip',name:'Путешествие',target:30000000,saved:10500000,color:'#b6f36a'},
     {id:'goal-buffer',name:'Финансовая подушка',target:60000000,saved:24000000,color:'#a78bfa'},
     {id:'goal-laptop',name:'Новый ноутбук',target:22000000,saved:6500000,color:'#69c9e8'}];
@@ -128,9 +129,33 @@ export function createState({demo = false} = {}) {
 
 export function validateState(input) {
   check(input && typeof input==='object' && !Array.isArray(input), 'Файл должен содержать объект данных');
-  check(input.schemaVersion===1, 'Неподдерживаемая версия файла');
+  check(input.schemaVersion===1||input.schemaVersion===2, 'Неподдерживаемая версия файла');
   let s; try { s=clone(input); } catch { fail('Файл содержит неподдерживаемые данные'); }
+  const legacy=s.schemaVersion===1;
   for(const name of ['wallets','categories','transactions','subscriptions','goals','debts','tags']) check(Array.isArray(s[name]), `Отсутствует список: ${name}`);
+  if(legacy) {
+    s.schemaVersion=2;
+    s.recurringRuns=[];
+    for(const sub of s.subscriptions) {
+      check(sub && typeof sub==='object','Некорректный регулярный платёж');
+      sub.type??='expense';sub.auto??=false;sub.startDate??=monthStart(today());
+      sub.categoryId??=s.categories.find(c=>c.id==='subscriptions'&&c.type===sub.type)?.id??s.categories.find(c=>c.type===sub.type)?.id;
+    }
+    for(const t of s.transactions) {
+      check(t && typeof t==='object','Некорректная операция');
+      if(t.subscriptionId!==undefined) {
+        const sub=s.subscriptions.find(sub=>sub.id===t.subscriptionId);
+        check(sub&&t.type===sub.type,'Некорректная подписка операции');
+        dateParts(t.date);t.recurrenceMonth??=t.date.slice(0,7);
+        if(!s.recurringRuns.some(r=>r.subscriptionId===t.subscriptionId&&r.month===t.recurrenceMonth))s.recurringRuns.push({subscriptionId:t.subscriptionId,month:t.recurrenceMonth});
+      }
+    }
+    for(const d of s.debts) {
+      check(d && typeof d==='object','Некорректный долг');
+      d.settled=s.transactions.filter(t=>t.debtId===d.id).reduce((n,t)=>sumSafe(n,t.amount),0)===d.amount;
+    }
+  }
+  check(Array.isArray(s.recurringRuns),'Отсутствует список: recurringRuns');
   check(s.settings && typeof s.settings==='object' && !Array.isArray(s.settings), 'Отсутствуют настройки');
   integer(s.settings.monthlyLimit,'Месячный лимит'); check(s.settings.currency==='RUB','Поддерживается только валюта RUB');
   check(s.wallets.length > 0, 'Добавьте хотя бы один счёт');
@@ -148,8 +173,13 @@ export function validateState(input) {
   for(const w of s.wallets) { str(w.name,'Название счёта',true); check(Number.isSafeInteger(w.initialBalance),'Некорректный начальный баланс'); scope(w.kind); color(w.color); }
   for(const c of s.categories) { str(c.name,'Название категории',true);enumValue(c.type,['expense','income'],'Тип категории');str(c.icon,'Значок',true);check(/^[a-z][a-z0-9-]*$/.test(c.icon),'Некорректное имя значка');color(c.color); }
   for(const g of s.goals) {str(g.name,'Название цели',true);integer(g.target,'Сумма цели',true);integer(g.saved,'Накоплено');color(g.color);}
-  for(const sub of s.subscriptions) {str(sub.name,'Название подписки',true);integer(sub.amount,'Сумма подписки',true);check(Number.isInteger(sub.day)&&sub.day>=1&&sub.day<=31,'День подписки должен быть от 1 до 31');wallet(sub.walletId);scope(sub.scope);}
+  for(const sub of s.subscriptions) {str(sub.name,'Название подписки',true);integer(sub.amount,'Сумма подписки',true);check(Number.isInteger(sub.day)&&sub.day>=1&&sub.day<=31,'День подписки должен быть от 1 до 31');wallet(sub.walletId);scope(sub.scope);enumValue(sub.type,['expense','income'],'Тип регулярного платежа');check(categories.has(sub.categoryId)&&categories.get(sub.categoryId).type===sub.type,'Категория не соответствует типу регулярного платежа');check(typeof sub.auto==='boolean','Некорректный автоматический режим');dateParts(sub.startDate);}
   for(const d of s.debts) {str(d.name,'Название долга',true);integer(d.amount,'Сумма долга',true);dateParts(d.dueDate);enumValue(d.direction,['receivable','payable'],'Тип долга');wallet(d.walletId);scope(d.scope);check(typeof d.settled==='boolean','Некорректный статус долга');}
+  const runKeys=new Set();
+  for(const run of s.recurringRuns) {
+    check(run&&typeof run==='object'&&!Array.isArray(run)&&subs.has(run.subscriptionId),'Некорректная запись регулярного платежа');
+    validMonth(run.month);const key=runKey(run.subscriptionId,run.month);check(!runKeys.has(key),'Регулярный платёж за этот месяц уже записан');runKeys.add(key);
+  }
   const goalContributions=new Map(), settlements=new Map();
   for(const t of s.transactions) {
     enumValue(t.type,['expense','income','transfer','goal'],'Тип операции');integer(t.amount,'Сумма операции',true);dateParts(t.date);wallet(t.walletId);scope(t.scope);str(t.note,'Заметка');check(Array.isArray(t.tags),'Теги операции должны быть списком'); t.tags.forEach(tag=>str(tag,'Тег',true));
@@ -159,11 +189,13 @@ export function validateState(input) {
     else check(t.categoryId===undefined,'Категория недопустима для этой операции');
     if(t.type==='goal') {check(goals.has(t.goalId),'Указана неизвестная цель');goalContributions.set(t.goalId,sumSafe(goalContributions.get(t.goalId)||0,t.amount));}
     else check(t.goalId===undefined,'Цель допустима только для накопления');
-    if(t.subscriptionId!==undefined) {check(t.type==='expense'&&subs.has(t.subscriptionId),'Некорректная подписка операции');}
-    if(t.debtId!==undefined) {const d=debts.get(t.debtId);check(d&&d.settled,'Некорректный погашенный долг');check(!settlements.has(d.id),'Долг уже погашен другой операцией');check(t.type===(d.direction==='receivable'?'income':'expense')&&t.amount===d.amount&&t.walletId===d.walletId&&t.scope===d.scope,'Операция не соответствует долгу');settlements.set(d.id,t.id);}
+    if(t.subscriptionId!==undefined) {check(['expense','income'].includes(t.type)&&subs.has(t.subscriptionId),'Некорректная подписка операции');t.recurrenceMonth??=t.date.slice(0,7);validMonth(t.recurrenceMonth);const key=runKey(t.subscriptionId,t.recurrenceMonth);if(!runKeys.has(key)) {s.recurringRuns.push({subscriptionId:t.subscriptionId,month:t.recurrenceMonth});runKeys.add(key);}}
+    else check(t.recurrenceMonth===undefined,'Месяц регулярного платежа требует связи с шаблоном');
+    check(t.subscriptionId===undefined||t.debtId===undefined,'Операция не может одновременно относиться к долгу и регулярному платежу');
+    if(t.debtId!==undefined) {const d=debts.get(t.debtId);check(d,'Некорректный долг операции');check(t.type===(d.direction==='receivable'?'income':'expense'),'Операция не соответствует направлению долга');settlements.set(d.id,sumSafe(settlements.get(d.id)||0,t.amount));}
   }
   for(const g of s.goals) check((goalContributions.get(g.id)||0)<=g.saved,'Накоплено по цели меньше суммы её операций');
-  for(const d of s.debts) check(!d.settled||settlements.has(d.id),'Для погашенного долга отсутствует операция');
+  for(const d of s.debts) {const paid=settlements.get(d.id)||0;check(paid<=d.amount,'Платежи превышают сумму долга');check(d.settled===(paid===d.amount),'Статус долга не соответствует сумме платежей');}
   s.tags.forEach(tag=>str(tag,'Тег',true));
   // Check all aggregate arithmetic as well as individual amounts.
   let absolute=0;
@@ -200,11 +232,23 @@ export function summary(state,{period='month',scope='all',now=today()}={}) {
   for(const t of periodTransactions(state,period,scope,now)) {if(t.type==='income')income=sumSafe(income,t.amount);if(t.type==='expense')expense=sumSafe(expense,t.amount);}
   return {income,expense,savingsRate:income>0?(income-expense)/income*100:0};
 }
+function validMonth(month) {check(typeof month==='string'&&/^\d{4}-\d{2}$/.test(month),'Месяц должен иметь формат ГГГГ-ММ');dateParts(`${month}-01`);return month;}
+function runKey(id,month) {return JSON.stringify([id,month]);}
+function nextMonth(month) {validMonth(month);const [y,m]=month.split('-').map(Number);check(y<9999||m<12,'Месяц выходит за допустимый диапазон');return m===12?`${y+1}-01`:`${y}-${String(m+1).padStart(2,'0')}`;}
+function monthDue(month,day) {validMonth(month);const [y,m]=month.split('-').map(Number);return dueDate(y,m,day);}
+function hasRun(state,id,month) {return (state.recurringRuns||[]).some(r=>r.subscriptionId===id&&r.month===month)||state.transactions.some(t=>t.subscriptionId===id&&(t.recurrenceMonth??t.date.slice(0,7))===month);}
+export function recurringStatus(state,id,now=today()) {
+  dateParts(now);const sub=state.subscriptions.find(s=>s.id===id);check(sub,'Регулярный платёж не найден');
+  const month=now.slice(0,7), due=monthDue(month,sub.day), startDate=sub.startDate??'1900-01-01';
+  const transaction=state.transactions.find(t=>t.subscriptionId===id&&(t.recurrenceMonth??t.date.slice(0,7))===month);
+  return {month,dueDate:due,recorded:hasRun(state,id,month),...(transaction?{transaction}:{}),startDate,active:due>=startDate};
+}
 export function upcomingSubscriptions(state,now=today()) {
-  const [y,m]=dateParts(now);
+  dateParts(now);
   return state.subscriptions.map(sub=>{
-    let nextDate=dueDate(y,m,sub.day);
-    if(nextDate<now){const next=new Date(y,m,1,12);nextDate=dueDate(next.getFullYear(),next.getMonth()+1,sub.day);}
+    let month=now.slice(0,7), nextDate=monthDue(month,sub.day);
+    if(nextDate<now||hasRun(state,sub.id,month)) {month=nextMonth(month);nextDate=monthDue(month,sub.day);}
+    if(sub.startDate&&nextDate<sub.startDate) {month=sub.startDate.slice(0,7);nextDate=monthDue(month,sub.day);if(nextDate<sub.startDate)nextDate=monthDue(nextMonth(month),sub.day);}
     return {...sub,nextDate,daysUntil:dayNumber(nextDate)-dayNumber(now)};
   }).sort((a,b)=>a.nextDate.localeCompare(b.nextDate)||a.name.localeCompare(b.name,'ru'));
 }
@@ -215,8 +259,8 @@ export function safeBudget(state,{scope='all',now=today()}={}) {
   const todayExpense=transactions.filter(t=>t.type==='expense'&&t.date===now).reduce((a,t)=>sumSafe(a,t.amount),0);
   let reserved=0;
   for(const sub of state.subscriptions.filter(s=>scope==='all'||s.scope===scope)) {
-    const paid=transactions.some(t=>t.type==='expense'&&(t.subscriptionId===sub.id || (t.walletId===sub.walletId&&t.amount===sub.amount&&t.note.toLocaleLowerCase('ru-RU').includes(sub.name.toLocaleLowerCase('ru-RU')))));
-    if(!paid) reserved=sumSafe(reserved,sub.amount);
+    const status=recurringStatus(state,sub.id,now);
+    if((sub.type??'expense')==='expense'&&status.active&&!status.recorded) reserved=sumSafe(reserved,sub.amount);
   }
   const remainingLimit=scope==='all'&&state.settings.monthlyLimit>0?Math.max(0,state.settings.monthlyLimit-monthlyExpense):null;
   let free=Math.max(0,totalBalance(state,scope,now)-reserved);
@@ -229,6 +273,10 @@ function commit(state,next) {const validated=validateState(next);Object.keys(sta
 function adjustGoal(next,t,sign) {if(t.type==='goal') {const goal=next.goals.find(g=>g.id===t.goalId);check(goal,'Цель не найдена');goal.saved=sumSafe(goal.saved,sign*t.amount);check(goal.saved>=0,'Недостаточно накоплений по цели');}}
 export function addTransaction(state,tx) {
   const next=clone(state), record=normalizeTx(tx);check(record.debtId===undefined,'Для погашения долга используйте действие «Погасить»');
+  if(record.subscriptionId!==undefined) {
+    const month=record.recurrenceMonth??record.date.slice(0,7);validMonth(month);check(month<=today().slice(0,7)&&record.date<=today(),'Нельзя записать регулярный платёж будущим числом');check(!hasRun(next,record.subscriptionId,month),'Регулярный платёж за этот месяц уже записан');
+    record.recurrenceMonth=month;next.recurringRuns??=[];next.recurringRuns.push({subscriptionId:record.subscriptionId,month});
+  }
   next.transactions.push(record);adjustGoal(next,record,1);commit(state,next);return state.transactions.find(t=>t.id===record.id);
 }
 export function updateTransaction(state,id,tx) {
@@ -239,20 +287,23 @@ export function updateTransaction(state,id,tx) {
     check(!Object.hasOwn(tx,'debtId')||tx.debtId===old.debtId,'Нельзя изменить связь операции с долгом');
     const record=normalizeTx({...old,...tx,id,type:old.type,debtId:old.debtId});
     const debt=next.debts.find(d=>d.id===old.debtId);check(debt,'Долг не найден');
-    debt.amount=record.amount;debt.walletId=record.walletId;debt.scope=record.scope;
-    next.transactions[index]=record;commit(state,next);return state.transactions.find(t=>t.id===id);
+    next.transactions[index]=record;refreshDebt(next,debt.id);commit(state,next);return state.transactions.find(t=>t.id===id);
   }
   const record=normalizeTx({...old,...tx,id});
   if(record.type!=='transfer') delete record.toWalletId;
   if(record.type!=='goal') delete record.goalId;
   if(record.type==='transfer'||record.type==='goal') delete record.categoryId;
-  if(record.type!=='expense') delete record.subscriptionId;
+  if(old.subscriptionId!==undefined) {
+    check(!Object.hasOwn(tx,'subscriptionId')||tx.subscriptionId===old.subscriptionId,'Нельзя изменить связь регулярного платежа');
+    check(!Object.hasOwn(tx,'recurrenceMonth')||tx.recurrenceMonth===old.recurrenceMonth,'Нельзя изменить месяц регулярного платежа');
+    check(record.type===old.type,'Нельзя изменить тип записанного регулярного платежа');
+  } else check(record.subscriptionId===undefined&&record.recurrenceMonth===undefined,'Для регулярного платежа используйте действие «Записать»');
   check(!record.debtId,'Нельзя присвоить операции погашение долга');adjustGoal(next,old,-1);adjustGoal(next,record,1);next.transactions[index]=record;commit(state,next);return state.transactions.find(t=>t.id===id);
 }
 export function deleteTransaction(state,id) {
   const next=clone(state), index=next.transactions.findIndex(t=>t.id===id);check(index>=0,'Операция не найдена');
   const [record]=next.transactions.splice(index,1);adjustGoal(next,record,-1);
-  if(record.debtId) {const debt=next.debts.find(d=>d.id===record.debtId);if(debt)debt.settled=false;}
+  if(record.debtId) {const debt=next.debts.find(d=>d.id===record.debtId);if(debt)refreshDebt(next,debt.id);}
   commit(state,next);return record;
 }
 export function fundGoal(state,goalId,walletId,amount,date=today()) {
@@ -260,13 +311,63 @@ export function fundGoal(state,goalId,walletId,amount,date=today()) {
   const goal=state.goals.find(g=>g.id===goalId);check(goal,'Цель не найдена');
   return addTransaction(state,{type:'goal',goalId,walletId,amount,date,scope:wallet.kind,note:`На цель «${goal.name}»`,tags:[]});
 }
-export function settleDebt(state,id,date=today()) {
-  const next=clone(state), debt=next.debts.find(d=>d.id===id);check(debt,'Долг не найден');check(!debt.settled,'Долг уже погашен');
+export function debtProgress(state,id) {
+  const debt=state.debts.find(d=>d.id===id);check(debt,'Долг не найден');
+  const payments=state.transactions.filter(t=>t.debtId===id).sort((a,b)=>b.date.localeCompare(a.date));
+  const paid=payments.reduce((n,t)=>sumSafe(n,t.amount),0);
+  return {total:debt.amount,paid,remaining:debt.amount-paid,payments};
+}
+function refreshDebt(state,id) {const debt=state.debts.find(d=>d.id===id);check(debt,'Долг не найден');const progress=debtProgress(state,id);check(progress.remaining>=0,'Платёж превышает остаток долга');debt.settled=progress.remaining===0;}
+export function payDebt(state,id,amount,{date=today(),walletId,note}={}) {
+  const next=clone(state), debt=next.debts.find(d=>d.id===id);check(debt,'Долг не найден');integer(amount,'Сумма платежа',true);
+  check(amount<=debtProgress(next,id).remaining,'Платёж превышает остаток долга');
   const type=debt.direction==='receivable'?'income':'expense';
-  let category=next.categories.find(c=>c.id===`other-${type}`)||next.categories.find(c=>c.type===type);
-  if(!category) {category={id:uid(),name:type==='income'?'Другой доход':'Другое',type,icon:'circle-check',color:'#94a3b8'};next.categories.push(category);}
-  const tx=normalizeTx({type,amount:debt.amount,date,walletId:debt.walletId,scope:debt.scope,categoryId:category.id,debtId:id,note:`Погашение: ${debt.name}`});
-  debt.settled=true;next.transactions.push(tx);commit(state,next);return state.transactions.find(t=>t.id===tx.id);
+  const category=next.categories.find(c=>c.id===`other-${type}`&&c.type===type)||next.categories.find(c=>c.type===type);check(category,'Категория не найдена');
+  const wallet=next.wallets.find(w=>w.id===(walletId??debt.walletId));check(wallet,'Счёт не найден');
+  const tx=normalizeTx({type,amount,date,walletId:wallet.id,scope:walletId!==undefined?wallet.kind:debt.scope,categoryId:category.id,debtId:id,note:note??`Погашение: ${debt.name}`});
+  next.transactions.push(tx);refreshDebt(next,id);commit(state,next);return state.transactions.find(t=>t.id===tx.id);
+}
+export function settleDebt(state,id,date=today()) {return payDebt(state,id,debtProgress(state,id).remaining,{date});}
+export function updateDebt(state,id,patch) {
+  const next=clone(state), index=next.debts.findIndex(d=>d.id===id);check(index>=0,'Долг не найден');
+  const old=next.debts[index], paid=debtProgress(next,id).paid;
+  check(!Object.hasOwn(patch,'id')||patch.id===id,'Нельзя изменить ID долга');
+  check(!paid||patch.direction===undefined||patch.direction===old.direction,'Нельзя изменить направление долга с платежами');
+  const record={...old,...clone(patch),id};integer(record.amount,'Сумма долга',true);check(record.amount>=paid,'Сумма долга меньше уже внесённых платежей');
+  next.debts[index]=record;refreshDebt(next,id);commit(state,next);return state.debts.find(d=>d.id===id);
+}
+function appendRecurring(next,id,month,{date,amount,walletId}={},now=today()) {
+  validMonth(month);dateParts(now);check(now<=today(),'Нельзя обрабатывать будущую дату');check(month<=now.slice(0,7),'Нельзя записать будущий месяц');
+  const sub=next.subscriptions.find(s=>s.id===id);check(sub,'Регулярный платёж не найден');const due=monthDue(month,sub.day);
+  check(due>=sub.startDate,'Шаблон ещё не действовал в выбранном месяце');
+  check(!hasRun(next,id,month),'Регулярный платёж за этот месяц уже записан');
+  const paymentDate=date??due;dateParts(paymentDate);check(paymentDate<=now,'Нельзя записать регулярный платёж будущим числом');
+  const tx=normalizeTx({type:sub.type,amount:amount??sub.amount,date:paymentDate,walletId:walletId??sub.walletId,categoryId:sub.categoryId,scope:sub.scope,note:sub.name,subscriptionId:id,recurrenceMonth:month});
+  next.transactions.push(tx);next.recurringRuns.push({subscriptionId:id,month});return tx;
+}
+export function recordRecurring(state,id,month=today().slice(0,7),options={}) {
+  const next=clone(state), tx=appendRecurring(next,id,month,options);commit(state,next);return state.transactions.find(t=>t.id===tx.id);
+}
+export function processRecurring(state,now=today()) {
+  dateParts(now);check(now<=today(),'Нельзя обрабатывать будущую дату');const next=clone(state), created=[];
+  for(const sub of next.subscriptions.filter(s=>s.auto===true)) {
+    dateParts(sub.startDate);let month=sub.startDate.slice(0,7), last=now.slice(0,7);
+    while(month<=last) {
+      const due=monthDue(month,sub.day);
+      if(due>=sub.startDate&&due<=now&&!hasRun(next,sub.id,month)) {
+        check(created.length<10000,'За один раз можно создать не более 10 000 регулярных операций. Уточните дату начала шаблонов.');
+        created.push(appendRecurring(next,sub.id,month,{},now));
+      }
+      if(month===last)break;month=nextMonth(month);
+    }
+  }
+  if(created.length)commit(state,next);return created.map(tx=>state.transactions.find(t=>t.id===tx.id));
+}
+export function deleteRecurring(state,id) {
+  const next=clone(state), index=next.subscriptions.findIndex(s=>s.id===id);check(index>=0,'Регулярный платёж не найден');
+  const [removed]=next.subscriptions.splice(index,1);next.recurringRuns=next.recurringRuns.filter(r=>r.subscriptionId!==id);
+  for(const tx of next.transactions)if(tx.subscriptionId===id) {delete tx.subscriptionId;delete tx.recurrenceMonth;}
+  commit(state,next);return removed;
 }
 export function csvExport(transactions,state) {
   const cell=value=> {let s=String(value??'');if(/^[\s\u0000-\u001f]*[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';};
