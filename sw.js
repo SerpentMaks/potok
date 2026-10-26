@@ -1,7 +1,7 @@
 /* Static, relative-path cache works at both / and /repository/ on GitHub Pages. */
 const PREFIX = 'potok-static-';
-const CACHE = PREFIX + 'v1.0.4';
-const CORE = ['./','./index.html','./styles.css','./app.js','./finance.js','./manifest.json','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png'];
+const CACHE = PREFIX + 'v1.0.5';
+const CORE = ['./','./index.html','./styles.css?v=1.0.5','./app.js','./finance.js','./manifest.json','./icon.svg','./icons/icon-192.png','./icons/icon-512.png','./icons/maskable-512.png'];
 const OPTIONAL = ['https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js','https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js'];
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
